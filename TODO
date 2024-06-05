@@ -1,8 +1,6 @@
 
 
-4.3.3: Voronoï Parallel Linear Enumeration algorithm in 2D
-
-Integrate Nanoflann
+Integrate Nanoflann KD-Trees to voronoi diagram
 
 Lab 7, ...
 
