@@ -2,5 +2,9 @@
 
 Integrate Nanoflann KD-Trees to voronoi diagram
 
-Lab 7, ...
+sections 4.4.3 and 4.4.4
 
+libLBFGS thing : static lbfgsfloatval_t evaluate(...) 
+test
+
+Lab 8, ...

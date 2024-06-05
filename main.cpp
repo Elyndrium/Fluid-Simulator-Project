@@ -183,8 +183,8 @@ Polygon clip_by_polygon(Polygon to_clip, Polygon clipper) {
   return to_clip;
 }
 
-Intersection intersect_bissec_voronoi(Vector segment_a, Vector segment_b, Vector voronoi_center, Vector other_point) {
-  double t = dot((voronoi_center + other_point) / 2 - segment_a, voronoi_center - other_point) / dot(segment_b - segment_a, voronoi_center - other_point);
+Intersection intersect_bissec_voronoi(Vector segment_a, Vector segment_b, Vector voronoi_center, Vector other_point, Vector M) {
+  double t = dot(M - segment_a, voronoi_center - other_point) / dot(segment_b - segment_a, voronoi_center - other_point);
   Vector P = segment_a + t * (segment_b - segment_a);
   if (t >= 0 && t <= 1) {
     return Intersection(P, t, true);
@@ -193,23 +193,24 @@ Intersection intersect_bissec_voronoi(Vector segment_a, Vector segment_b, Vector
   }
 }
 
-bool towards_inside_voronoi(Vector point, Vector voronoi_center, Vector other_point) {
-  return dot(point - (voronoi_center + other_point) / 2, other_point - voronoi_center) < 0;
+bool towards_inside_voronoi(Vector point, Vector voronoi_center, Vector other_point, Vector M) {
+  return dot(point - M, other_point - voronoi_center) < 0;
 }
 
-Polygon clip_by_bissec_voronoi(Polygon to_clip, Vector voronoi_center, Vector other_point) {
+Polygon clip_by_bissec_voronoi(Polygon to_clip, Vector voronoi_center, Vector other_point, double weight_center = 1, double weight_other = 1) {
   // Modified Sutherland-Hodgman algorithm
   Polygon clipped;
+  Vector M = (voronoi_center + other_point) / 2 + (((weight_center-weight_other)/(2 * (voronoi_center-other_point).norm2())) * (other_point-voronoi_center));
   for (int j = 0; j < to_clip.vertices.size(); j++) {
     Vector B = to_clip.vertices[j];
     Vector A = to_clip.vertices[(j - 1) >= 0 ? (j - 1) : to_clip.vertices.size() - 1];
-    Intersection intersect = intersect_bissec_voronoi(A, B, voronoi_center, other_point);
-    if (towards_inside_voronoi(B, voronoi_center, other_point)) {
-      if (!towards_inside_voronoi(A, voronoi_center, other_point)) {
+    Intersection intersect = intersect_bissec_voronoi(A, B, voronoi_center, other_point, M);
+    if (towards_inside_voronoi(B, voronoi_center, other_point, M)) {
+      if (!towards_inside_voronoi(A, voronoi_center, other_point, M)) {
         clipped.vertices.push_back(intersect.position);
       }
       clipped.vertices.push_back(B);
-    } else if (towards_inside_voronoi(A, voronoi_center, other_point)) {
+    } else if (towards_inside_voronoi(A, voronoi_center, other_point, M)) {
       clipped.vertices.push_back(intersect.position);
     }
   }
@@ -219,8 +220,14 @@ Polygon clip_by_bissec_voronoi(Polygon to_clip, Vector voronoi_center, Vector ot
 class PointCloud {
 public:
   std::vector<Vector> points;
+  std::vector<double> weights;
 
-  PointCloud(std::vector<Vector> points) : points(points) {}
+  PointCloud(std::vector<Vector> points) : points(points) {
+    for (int i = 0; i < points.size(); i++) {
+      weights.push_back(1);
+    }
+  }
+  PointCloud(std::vector<Vector> points, std::vector<double> weights) : points(points), weights(weights) {}
 
   std::vector<Polygon> generate_voronoi() {
     std::vector<Polygon> voronoi;
@@ -228,7 +235,7 @@ public:
       Polygon voronoi_cell = Polygon({Vector(0, 0), Vector(1, 0), Vector(1, 1), Vector(0, 1)});
       for (int j = 0; j < points.size(); j++) {
         if (i != j) {
-          voronoi_cell = clip_by_bissec_voronoi(voronoi_cell, points[i], points[j]);
+          voronoi_cell = clip_by_bissec_voronoi(voronoi_cell, points[i], points[j], weights[i], weights[j]);
         }
       }
       voronoi.push_back(voronoi_cell);
@@ -238,26 +245,12 @@ public:
 };
 
 int main() {
-  // create a polygon in trigonometric order
-  /*
-  Polygon poly;
-  poly.vertices.push_back(Vector(0.5, 0.1));
-  poly.vertices.push_back(Vector(0.9, 0.9));
-  poly.vertices.push_back(Vector(0.1, 0.9));
-  poly.vertices.push_back(Vector(0.1, 0.5));
-  Polygon clipping_hexagon;
-  // define a centered hexagon
-  for (int i = 0; i < 6; i++) {
-    clipping_hexagon.vertices.push_back(Vector(0.6 + 0.4 * cos(i * 2 * 3.141592653589793236 / 6), 0.5 + 0.4 * sin(i * 2 * 3.141592653589793236 / 6)));
-  }
-  // save the polygon to an svg file
-  Polygon polynice = clip_by_polygon(poly, clipping_hexagon);
-  save_svg({polynice}, "polygon.svg");*/
-
   // Create point cloud
   std::vector<Vector> points = {Vector(0.5, 0.5), Vector(0.2, 0.2), Vector(0.8, 0.2), Vector(0.8, 0.8), Vector(0.2, 0.8)};
+  // With weights
+  std::vector<double> weights = {1, 1, 1, 1, 1};
+  PointCloud pc(points, weights);
   // Create voronoi diagram
-  PointCloud pc(points);
   std::vector<Polygon> voronoi = pc.generate_voronoi();
   save_svg({voronoi}, "voronoi.svg");
 
