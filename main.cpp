@@ -2,6 +2,7 @@
 #include <cmath>
 #include <iostream>
 #include <vector>
+#include <string>
 
 class Vector {
 public:
@@ -63,6 +64,7 @@ Vector cross(const Vector &a, const Vector &b) {
 // if the Polygon class name conflicts with a class in wingdi.h on Windows, use a namespace or change the name
 class Polygon {
 public:
+  // Needs to be described in the trigonometric order
   std::vector<Vector> vertices;
 };
 
@@ -131,15 +133,69 @@ void save_svg_animated(const std::vector<Polygon> &polygons, std::string filenam
   fclose(f);
 }
 
-int main(){
-    // create a polygon
-    Polygon poly;
-    poly.vertices.push_back(Vector(0.5, 0.1));
-    poly.vertices.push_back(Vector(0.9, 0.1));
-    poly.vertices.push_back(Vector(0.7, 0.5));
-    poly.vertices.push_back(Vector(0.5, 0.9));
-    poly.vertices.push_back(Vector(0.3, 0.5));
-    // save the polygon to an svg file
-    save_svg({poly}, "polygon.svg");
-    return 0;
+struct Intersection {
+  Vector position;
+  double t;
+  bool intersected;
+  Intersection(Vector position, double t, bool intersected) : position(position), t(t), intersected(intersected) {}
+};
+
+Intersection intersect_line(Vector segment_a, Vector segment_b, Vector line_u, Vector line_v) {
+  Vector outwards_normal = Vector(line_v[1] - line_u[1], line_u[0] - line_v[0]); // TODO verify
+  double t = dot(line_u - segment_a, outwards_normal) / dot(segment_b - segment_a, outwards_normal);
+  Vector P = segment_a + t * (segment_b - segment_a);
+  if (t >= 0 && t <= 1) {
+    return Intersection(P, t, true);
+  } else {
+    return Intersection(P, t, false);
+  }
+}
+
+bool towards_inside(Vector point, Vector line_u, Vector line_v) {
+  Vector outwards_normal = Vector(line_v[1] - line_u[1], line_u[0] - line_v[0]); // TODO verify
+  return dot(point - line_u, outwards_normal) <= 0;
+}
+
+Polygon clip_by_polygon(Polygon to_clip, Polygon clipper) {
+  // Sutherland-Hodgman algorithm
+  for (int i = 0; i < clipper.vertices.size(); i++) {
+    // We clip on this line
+    Polygon clipped;
+    Vector curClipVertex = clipper.vertices[i];
+    Vector prevClipVertex = clipper.vertices[(i - 1) >= 0 ? (i-1):  clipper.vertices.size()-1];
+    // We clip what's on the left of the line
+    for (int j = 0; j < to_clip.vertices.size(); j++) {
+      Vector curVertex = to_clip.vertices[j];
+      Vector prevVertex = to_clip.vertices[(j - 1) >= 0 ? (j-1):  to_clip.vertices.size()-1];
+      Intersection intersect = intersect_line(prevVertex, curVertex, prevClipVertex, curClipVertex);
+      if (towards_inside(curVertex, prevClipVertex, curClipVertex)) {
+        if (!towards_inside(prevVertex, prevClipVertex, curClipVertex)) {
+          clipped.vertices.push_back(intersect.position);
+        }
+        clipped.vertices.push_back(curVertex);
+      } else if (towards_inside(prevVertex, prevClipVertex, curClipVertex)) {
+        clipped.vertices.push_back(intersect.position);
+      }
+    }
+    to_clip = clipped;
+  }
+  return to_clip;
+}
+
+int main() {
+  // create a polygon in trigonometric order
+  Polygon poly;
+  poly.vertices.push_back(Vector(0.5, 0.1));
+  poly.vertices.push_back(Vector(0.9, 0.9));
+  poly.vertices.push_back(Vector(0.1, 0.9));
+  poly.vertices.push_back(Vector(0.1, 0.5));
+  Polygon clipping_hexagon;
+  // define a centered hexagon
+  for (int i = 0; i < 6; i++) {
+    clipping_hexagon.vertices.push_back(Vector(0.6 + 0.4 * cos(i * 2 * M_PI / 6), 0.5 + 0.4 * sin(i * 2 * M_PI / 6)));
+  }
+  // save the polygon to an svg file
+  Polygon polynice = clip_by_polygon(poly, clipping_hexagon);
+  save_svg({polynice}, "polygon.svg");
+  return 0;
 }

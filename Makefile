@@ -13,3 +13,4 @@ debug:
 clean:
 	del sim.exe
 	del debug_sim.exe
+	del *.svg
