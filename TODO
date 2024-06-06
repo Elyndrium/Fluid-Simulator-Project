@@ -1,10 +1,11 @@
 
 
-Integrate Nanoflann KD-Trees to voronoi diagram
-
-sections 4.4.3 and 4.4.4
-
-libLBFGS thing : static lbfgsfloatval_t evaluate(...) 
-test
+Integrate Nanoflann KD-Trees to voronoi diagram / parallelize
 
 Lab 8, ...
+
+  DONE:
+
+- Sutherland-Hodgman polygon clipping algorithm
+- Voronoi and Power diagrams
+- Weight optimization

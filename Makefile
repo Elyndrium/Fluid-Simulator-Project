@@ -1,7 +1,9 @@
 
 build:
 	del sim.exe
-	g++ main.cpp -Ofast -flto -funroll-loops -finline-functions -march=native -o sim.exe
+	g++ main.cpp -O3 -o sim.exe
+
+# -Ofast -flto -funroll-loops -finline-functions -march=native
 
 run: clean build
 	sim.exe

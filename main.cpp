@@ -1,4 +1,5 @@
 // include necessary libraries
+#include "lbfgs.c"
 #include <cmath>
 #include <iostream>
 #include <string>
@@ -73,10 +74,10 @@ public:
 void save_svg(const std::vector<Polygon> &polygons, std::string filename, std::string fillcol = "none") {
   FILE *f = fopen(filename.c_str(), "w+");
   fprintf(f, "<svg xmlns = \"http://www.w3.org/2000/svg\" width = \"1000\" height = \"1000\">\n");
-  for (int i = 0; i < polygons.size(); i++) {
+  for (size_t i = 0; i < polygons.size(); i++) {
     fprintf(f, "<g>\n");
     fprintf(f, "<polygon points = \"");
-    for (int j = 0; j < polygons[i].vertices.size(); j++) {
+    for (size_t j = 0; j < polygons[i].vertices.size(); j++) {
       fprintf(f, "%3.3f, %3.3f ", (polygons[i].vertices[j][0] * 1000), (1000 - polygons[i].vertices[j][1] * 1000));
     }
     fprintf(f, "\"\nfill = \"%s\" stroke = \"black\"/>\n", fillcol.c_str());
@@ -99,9 +100,9 @@ void save_svg_animated(const std::vector<Polygon> &polygons, std::string filenam
     f = fopen(filename.c_str(), "a+");
   }
   fprintf(f, "<g>\n");
-  for (int i = 0; i < polygons.size(); i++) {
+  for (size_t i = 0; i < polygons.size(); i++) {
     fprintf(f, "<polygon points = \"");
-    for (int j = 0; j < polygons[i].vertices.size(); j++) {
+    for (size_t j = 0; j < polygons[i].vertices.size(); j++) {
       fprintf(f, "%3.3f, %3.3f ", (polygons[i].vertices[j][0] * 1000), (1000 - polygons[i].vertices[j][1] * 1000));
     }
     fprintf(f, "\"\nfill = \"none\" stroke = \"black\"/>\n");
@@ -159,15 +160,15 @@ bool towards_inside(Vector point, Vector line_u, Vector line_v) {
 
 Polygon clip_by_polygon(Polygon to_clip, Polygon clipper) {
   // Sutherland-Hodgman algorithm
-  for (int i = 0; i < clipper.vertices.size(); i++) {
+  for (size_t i = 0; i < clipper.vertices.size(); i++) {
     // We clip on this line
     Polygon clipped;
     Vector curClipVertex = clipper.vertices[i];
-    Vector prevClipVertex = clipper.vertices[(i - 1) >= 0 ? (i - 1) : clipper.vertices.size() - 1];
+    Vector prevClipVertex = clipper.vertices[i >= 1 ? (i - 1) : clipper.vertices.size() - 1];
     // We clip what's on the left of the line
-    for (int j = 0; j < to_clip.vertices.size(); j++) {
+    for (size_t j = 0; j < to_clip.vertices.size(); j++) {
       Vector curVertex = to_clip.vertices[j];
-      Vector prevVertex = to_clip.vertices[(j - 1) >= 0 ? (j - 1) : to_clip.vertices.size() - 1];
+      Vector prevVertex = to_clip.vertices[j >= 1 ? (j - 1) : to_clip.vertices.size() - 1];
       Intersection intersect = intersect_line(prevVertex, curVertex, prevClipVertex, curClipVertex);
       if (towards_inside(curVertex, prevClipVertex, curClipVertex)) {
         if (!towards_inside(prevVertex, prevClipVertex, curClipVertex)) {
@@ -200,10 +201,10 @@ bool towards_inside_voronoi(Vector point, Vector voronoi_center, Vector other_po
 Polygon clip_by_bissec_voronoi(Polygon to_clip, Vector voronoi_center, Vector other_point, double weight_center = 1, double weight_other = 1) {
   // Modified Sutherland-Hodgman algorithm
   Polygon clipped;
-  Vector M = (voronoi_center + other_point) / 2 + (((weight_center-weight_other)/(2 * (voronoi_center-other_point).norm2())) * (other_point-voronoi_center));
-  for (int j = 0; j < to_clip.vertices.size(); j++) {
+  Vector M = (voronoi_center + other_point) / 2 + (((weight_center - weight_other) / (2 * (voronoi_center - other_point).norm2())) * (other_point - voronoi_center));
+  for (size_t j = 0; j < to_clip.vertices.size(); j++) {
     Vector B = to_clip.vertices[j];
-    Vector A = to_clip.vertices[(j - 1) >= 0 ? (j - 1) : to_clip.vertices.size() - 1];
+    Vector A = to_clip.vertices[j >= 1 ? (j - 1) : to_clip.vertices.size() - 1];
     Intersection intersect = intersect_bissec_voronoi(A, B, voronoi_center, other_point, M);
     if (towards_inside_voronoi(B, voronoi_center, other_point, M)) {
       if (!towards_inside_voronoi(A, voronoi_center, other_point, M)) {
@@ -217,23 +218,96 @@ Polygon clip_by_bissec_voronoi(Polygon to_clip, Vector voronoi_center, Vector ot
   return clipped;
 }
 
+std::vector<Polygon> triangulate(Polygon polygon) {
+  std::vector<Polygon> triangles;
+  for (size_t i = 1; i + 1 < polygon.vertices.size(); i++) {
+    triangles.push_back(Polygon({polygon.vertices[0], polygon.vertices[i], polygon.vertices[i + 1]}));
+  }
+  return triangles;
+}
+double triangle_area(Polygon tri) {
+  if (tri.vertices.size() != 3) {
+    std::cout << "Error: triangle has more than 3 vertices" << std::endl;
+    throw "Error: triangle has more than 3 vertices";
+  }
+  return 0.5 * cross(tri.vertices[1] - tri.vertices[0], tri.vertices[2] - tri.vertices[0]).norm();
+}
+
 class PointCloud {
 public:
   std::vector<Vector> points;
   std::vector<double> weights;
+  std::vector<double> lambda; // Wanted area of the voronoi cell
 
   PointCloud(std::vector<Vector> points) : points(points) {
-    for (int i = 0; i < points.size(); i++) {
+    for (size_t i = 0; i < points.size(); i++) {
       weights.push_back(1);
     }
   }
-  PointCloud(std::vector<Vector> points, std::vector<double> weights) : points(points), weights(weights) {}
+  PointCloud(std::vector<Vector> points, std::vector<double> lambda_) : points(points) {
+    for (size_t i = 0; i < points.size(); i++) {
+      weights.push_back(1);
+    }
+    set_lambda(lambda_);
+    std::vector<double> new_weights = optimize();
+    for (size_t i = 0; i < points.size(); i++) {
+      weights[i] = new_weights[i];
+    }
+  }
+
+  void set_lambda(std::vector<double> lambda_) {
+    double tot = 0;
+    for (double l : lambda_) {
+      tot += l;
+    }
+    if (lambda.size() == 0) {
+      for (size_t i = 0; i < points.size(); i++) {
+        lambda.push_back(lambda_[i] / tot);
+      }
+    } else if (lambda.size() == points.size()) {
+      for (size_t i = 0; i < points.size(); i++) {
+        lambda[i] = lambda_[i] / tot;
+      }
+    } else {
+      std::cout << "Error: lambda size does not match the number of points" << std::endl;
+      throw "Error: lambda size does not match the number of points";
+    }
+  }
+
+  std::vector<double> optimize() {
+    // We want to optimize the weights
+    lbfgsfloatval_t fx;
+    lbfgsfloatval_t *x = lbfgs_malloc(points.size());
+    lbfgs_parameter_t param;
+
+    // Initialize the weights
+    for (size_t i = 0; i < points.size(); i++) {
+      x[i] = 0.1;
+    }
+    // Do the parameter thing
+    lbfgs_parameter_init(&param);
+
+    // Call lbfgs
+    lbfgs(points.size(), x, &fx, evaluate, progress, this, &param);
+
+    // Copy the optimized weights
+    std::vector<double> new_weights;
+    for (size_t i = 0; i < points.size(); i++) {
+      new_weights.push_back(x[i]);
+    }
+
+    // Don't forget to free the memory
+    lbfgs_free(x);
+
+    // Return the optimized weights
+    return new_weights;
+  }
 
   std::vector<Polygon> generate_voronoi() {
     std::vector<Polygon> voronoi;
-    for (int i = 0; i < points.size(); i++) {
+    for (size_t i = 0; i < points.size(); i++) {
       Polygon voronoi_cell = Polygon({Vector(0, 0), Vector(1, 0), Vector(1, 1), Vector(0, 1)});
-      for (int j = 0; j < points.size(); j++) {
+      for (size_t j = 0; j < points.size(); j++) {
         if (i != j) {
           voronoi_cell = clip_by_bissec_voronoi(voronoi_cell, points[i], points[j], weights[i], weights[j]);
         }
@@ -242,17 +316,80 @@ public:
     }
     return voronoi;
   }
+
+  static lbfgsfloatval_t evaluate( // contains extra parameters
+      void *instance,
+      const lbfgsfloatval_t *x,
+      lbfgsfloatval_t *g,
+      const int n,
+      const lbfgsfloatval_t step) {
+    // x is W, g is where i put gradient, n is the dimension? step i don't think i care
+    // return g(W) ?
+    (void)step;
+    PointCloud pc = *(PointCloud *)(instance);
+    if ((size_t)n != pc.lambda.size()) {
+      std::cout << "Error: n and lambda size do not match" << std::endl;
+      return -1;
+    }
+    for (int i = 0; i < n; i++) {
+      pc.weights[i] = x[i];
+    }
+
+    // We have the point cloud, now we can calculate the voronoi diagram
+    std::vector<Polygon> voronoi = pc.generate_voronoi();
+    // say the weights
+    lbfgsfloatval_t fx = 0.0;
+    // We make the actual computations
+    for (int i = 0; i < n; i++) {
+      double v_area = 0;
+      // We add integral of ||x - yi||^2 for each i
+      for (Polygon tri : triangulate(voronoi[i])) {
+        double T = triangle_area(tri);
+        v_area += T;
+        for (int k = 0; k < 3; k++) {
+          for (int l = k; l < 3; l++) {
+            fx += (T / 6) * dot(tri.vertices[k] - pc.points[i], tri.vertices[l] - pc.points[i]);
+          }
+        }
+      }
+      // Finally
+      g[i] = -(-v_area + pc.lambda[i]);
+      fx += -v_area * x[i] + pc.lambda[i] * x[i];
+    }
+    return -fx;
+  }
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-parameter"
+  static int progress(
+      void *instance,
+      const lbfgsfloatval_t *x,
+      const lbfgsfloatval_t *g,
+      const lbfgsfloatval_t fx,
+      const lbfgsfloatval_t xnorm,
+      const lbfgsfloatval_t gnorm,
+      const lbfgsfloatval_t step,
+      int n,
+      int k,
+      int ls) {
+
+    /*
+    printf("Iteration %d:\n", k);
+    printf("  fx = %f", fx);
+    printf("  xnorm = %f, gnorm = %f, step = %f\n", xnorm, gnorm, step);
+    printf("\n");*/
+    return 0;
+  }
+#pragma GCC diagnostic pop
 };
 
 int main() {
   // Create point cloud
   std::vector<Vector> points = {Vector(0.5, 0.5), Vector(0.2, 0.2), Vector(0.8, 0.2), Vector(0.8, 0.8), Vector(0.2, 0.8)};
-  // With weights
-  std::vector<double> weights = {1, 1, 1, 1, 1};
-  PointCloud pc(points, weights);
+  PointCloud pc(points, {0.2, 0.3, 0.2, 0.2, 0.2});
   // Create voronoi diagram
   std::vector<Polygon> voronoi = pc.generate_voronoi();
-  save_svg({voronoi}, "voronoi.svg");
+  save_svg(voronoi, "voronoi.svg");
 
   return 0;
 }
