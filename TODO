@@ -1,11 +1,6 @@
 
 
-parallelize voronoi
-
-Lab 8, ...
-
-  DONE:
-
 - Sutherland-Hodgman polygon clipping algorithm
-- Voronoi and Power diagrams
+- Parallelized Voronoi and Power diagrams
 - Weight optimization
+- Free surface fluid simulator

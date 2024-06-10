@@ -147,71 +147,6 @@ void save_frame(const std::vector<Polygon> &cells, std::string filename, int N, 
   stbi_write_png(os.str().c_str(), W, H, 3, &image[0], 0);
 }
 
-// saves a static svg file. The polygon vertices are supposed to be in the range [0..1], and a canvas of size 1000x1000 is created
-void save_svg(const std::vector<Polygon> &polygons, std::string filename, std::string fillcol = "none") {
-  FILE *f = fopen(filename.c_str(), "w+");
-  fprintf(f, "<svg xmlns = \"http://www.w3.org/2000/svg\" width = \"1000\" height = \"1000\">\n");
-  for (size_t i = 0; i < polygons.size(); i++) {
-    fprintf(f, "<g>\n");
-    fprintf(f, "<polygon points = \"");
-    for (size_t j = 0; j < polygons[i].vertices.size(); j++) {
-      fprintf(f, "%3.3f, %3.3f ", (polygons[i].vertices[j][0] * 1000), (1000 - polygons[i].vertices[j][1] * 1000));
-    }
-    fprintf(f, "\"\nfill = \"%s\" stroke = \"black\"/>\n", fillcol.c_str());
-    fprintf(f, "</g>\n");
-  }
-  fprintf(f, "</svg>\n");
-  fclose(f);
-}
-
-// Adds one frame of an animated svg file. frameid is the frame number (between 0 and nbframes-1).
-// polygons is a list of polygons, describing the current frame.
-// The polygon vertices are supposed to be in the range [0..1], and a canvas of size 1000x1000 is created
-void save_svg_animated(const std::vector<Polygon> &polygons, std::string filename, int frameid, int nbframes) {
-  FILE *f;
-  if (frameid == 0) {
-    f = fopen(filename.c_str(), "w+");
-    fprintf(f, "<svg xmlns = \"http://www.w3.org/2000/svg\" width = \"1000\" height = \"1000\">\n");
-    fprintf(f, "<g>\n");
-  } else {
-    f = fopen(filename.c_str(), "a+");
-  }
-  fprintf(f, "<g>\n");
-  for (size_t i = 0; i < polygons.size(); i++) {
-    fprintf(f, "<polygon points = \"");
-    for (size_t j = 0; j < polygons[i].vertices.size(); j++) {
-      fprintf(f, "%3.3f, %3.3f ", (polygons[i].vertices[j][0] * 1000), (1000 - polygons[i].vertices[j][1] * 1000));
-    }
-    fprintf(f, "\"\nfill = \"none\" stroke = \"black\"/>\n");
-  }
-  fprintf(f, "<animate\n");
-  fprintf(f, "    id = \"frame%u\"\n", frameid);
-  fprintf(f, "    attributeName = \"display\"\n");
-  fprintf(f, "    values = \"");
-  for (int j = 0; j < nbframes; j++) {
-    if (frameid == j) {
-      fprintf(f, "inline");
-    } else {
-      fprintf(f, "none");
-    }
-    fprintf(f, ";");
-  }
-  fprintf(f, "none\"\n    keyTimes = \"");
-  for (int j = 0; j < nbframes; j++) {
-    fprintf(f, "%2.3f", j / (double)(nbframes));
-    fprintf(f, ";");
-  }
-  fprintf(f, "1\"\n   dur = \"5s\"\n");
-  fprintf(f, "    begin = \"0s\"\n");
-  fprintf(f, "    repeatCount = \"indefinite\"/>\n");
-  fprintf(f, "</g>\n");
-  if (frameid == nbframes - 1) {
-    fprintf(f, "</g>\n");
-    fprintf(f, "</svg>\n");
-  }
-  fclose(f);
-}
-
 struct Intersection {
   Vector position;
   double t;
@@ -314,61 +249,58 @@ class PointCloud {
 public:
   std::vector<Vector> points;
   std::vector<double> weights;
-  std::vector<double> lambda; // Wanted area of the voronoi cell
   std::vector<Vector> velocities;
-  int N_particles;
   int nb_liquid = 0;
   double liquid_proportion = 0.1;
+  double air_weight = 0.1;
 
-  PointCloud(std::vector<Vector> points) : points(points) {
-    for (size_t i = 0; i < points.size(); i++) {
-      weights.push_back(1);
-    }
-  }
-  PointCloud(std::vector<Vector> points, std::vector<double> lambda_) : points(points) {
-    for (size_t i = 0; i < points.size(); i++) {
-      weights.push_back(1);
-    }
-    optimize_for_lambda(lambda_);
-  }
-  PointCloud(double liquid_proportion, int N_part) : N_particles(N_part), liquid_proportion(liquid_proportion) {
+  PointCloud(double liquid_proportion, int N_part, std::vector<Vector> (*repartition)(int) = nullptr) : nb_liquid(N_part), liquid_proportion(liquid_proportion) {
     if (liquid_proportion <= 0 || liquid_proportion >= 1) {
       std::cout << "Error: proportion must be between 0 and 1" << std::endl;
       throw "Error: proportion must be between 0 and 1";
     }
-    // Generate points randomly
-    nb_liquid = std::floor(N_part * liquid_proportion);
-    std::mt19937 generator(std::clock());
-    std::uniform_real_distribution<double> pos(0, 1);
-    for (int i = 0; i < N_particles; i++) {
-      points.push_back(Vector(pos(generator), pos(generator)));
-      weights.push_back(1);
-    }
-    // Lloyd iterations
-    int n_lloyd = 10;
-    if (points.size() > 1000) {
-      n_lloyd = 5;
-      if (points.size() > 10000) {
-        n_lloyd = 3;
-      }
-    }
-    if (points.size() <= 400) {
-      n_lloyd = 30;
-    }
-    for (int i = 0; i < n_lloyd; ++i) {
-      lloyd();
-      if (n_lloyd < 10 || i % (n_lloyd / 10) == 0) {
-        std::cout << "Lloyd iteration " << (double)100.0 * i / n_lloyd << "%" << std::endl;
-      }
-    }
-    std::cout << "Lloyd done" << std::endl;
 
-    for (size_t i = 0; i < nb_liquid; i++) {
-      velocities.push_back(Vector(0, 0));
+    if (repartition == nullptr) {
+      for (int i = 0; i < nb_liquid; i++) {
+        weights.push_back(1);
+        velocities.push_back(Vector(0, 0));
+      }
+      // Generate points randomly
+      std::mt19937 generator(std::clock());
+      std::uniform_real_distribution<double> pos(0, 1);
+      for (int i = 0; i < nb_liquid; i++) {
+        points.push_back(Vector(pos(generator), pos(generator)));
+        weights.push_back(1);
+      }
+      // Lloyd iterations to make the points more regular
+      int n_lloyd = 10;
+      if (points.size() > 1000) {
+        n_lloyd = 5;
+        if (points.size() > 10000) {
+          n_lloyd = 3;
+        }
+      }
+      if (points.size() <= 400) {
+        n_lloyd = 30;
+      }
+      for (int i = 0; i < n_lloyd; ++i) {
+        lloyd();
+        if (n_lloyd < 10 || i % (n_lloyd / 10) == 0) {
+          std::cout << "Lloyd iteration " << (double)100.0 * i / n_lloyd << "%" << std::endl;
+        }
+      }
+      std::cout << "Lloyd done" << std::endl;
+    } else {
+      points = repartition(nb_liquid);
+      nb_liquid = points.size();
+      for (int i = 0; i < nb_liquid; i++) {
+        weights.push_back(1);
+        velocities.push_back(Vector(0, 0));
+      }
     }
   }
 
-  void lloyd() {
+  void lloyd(size_t start_moving = 0) {
     std::vector<Polygon> voron = generate_voronoi();
     std::vector<Vector> new_points;
     for (size_t i = 0; i < points.size(); i++) {
@@ -382,64 +314,24 @@ public:
         centroid = centroid + T * (tri.vertices[0] + tri.vertices[1] + tri.vertices[2]) / 3;
       }
       centroid = centroid / area;
-      new_points.push_back(centroid + (centroid - points[i]) * 0.3); // Over relax
-    }
-    points = new_points;
-  }
-
-  void select(bool (*selection)(Vector)) {
-    std::vector<Vector> new_points;
-    nb_liquid = 0;
-    for (size_t i = 0; i < points.size(); i++) {
-      if (selection(points[i])) {
+      if (i < start_moving) {
         new_points.push_back(points[i]);
-        ++nb_liquid;
-      }
-    }
-    for (size_t i = 0; i < points.size(); i++) {
-      if (!selection(points[i])) {
-        new_points.push_back(points[i]);
+      } else {
+        new_points.push_back(centroid + (centroid - points[i]) * 0.3); // Over relax
       }
     }
     points = new_points;
-  }
-
-  void optimize_for_lambda(std::vector<double> lambda_) {
-    set_lambda(lambda_);
-    std::vector<double> new_weights = optimize();
-    for (size_t i = 0; i < points.size(); i++) {
-      weights[i] = new_weights[i];
-    }
-  }
-
-  void set_lambda(std::vector<double> lambda_) {
-    double tot = 0;
-    for (double l : lambda_) {
-      tot += l;
-    }
-    if (lambda.size() == 0) {
-      for (size_t i = 0; i < points.size(); i++) {
-        lambda.push_back(lambda_[i] / tot);
-      }
-    } else if (lambda.size() == points.size()) {
-      for (size_t i = 0; i < points.size(); i++) {
-        lambda[i] = lambda_[i] / tot;
-      }
-    } else {
-      std::cout << "Error: lambda size does not match the number of points" << std::endl;
-      throw "Error: lambda size does not match the number of points";
-    }
   }
 
   void animate(int nb_frames, double epsilon, double dt, double mass) {
     for (int i = 0; i < nb_frames; ++i) {
       optimize_for_liquid();
-      std::vector<Polygon> voronoi = generate_voronoi();
+      std::vector<Polygon> voronoi = generate_voronoi_liquid();
       save_frame(voronoi, "animation", nb_liquid, i);
       std::cout << "Frame " << i << std::endl;
       time_step_post_optimization(epsilon, dt, mass, voronoi);
-      // TODO FORCE STAY INSIDE 0, 1
-      // TODO lloyd the air particles (probably?)
+      // TODO remove redundant generate_voronoi
+      // TODO time functions
     }
   }
 
@@ -460,36 +352,18 @@ public:
       Vector fi = fi_spring + mass * Vector(0, -9.81); // Gravity
       velocities[i] = velocities[i] + dt * fi / mass;
       points[i] = points[i] + dt * velocities[i];
+      // Bounce with dampened velocity by 2
+      double velocity_dampening = 0.3;
+      for (int j = 0; j < 2; j++) {
+        if (points[i][j] < 0) {
+          points[i][j] = -points[i][j] * velocity_dampening;
+          velocities[i][j] = -velocities[i][j] * velocity_dampening;
+        } else if (points[i][j] > 1) {
+          points[i][j] = 1 - (points[i][j] - 1) * velocity_dampening;
+          velocities[i][j] = -velocities[i][j] * velocity_dampening;
+        }
+      }
     }
-  }
-
-  std::vector<double> optimize() {
-    // We want to optimize the weights
-    lbfgsfloatval_t fx;
-    lbfgsfloatval_t *x = lbfgs_malloc(points.size());
-    lbfgs_parameter_t param;
-
-    // Initialize the weights
-    for (size_t i = 0; i < points.size(); i++) {
-      x[i] = weights[i];
-    }
-    // Do the parameter thing
-    lbfgs_parameter_init(&param);
-
-    // Call lbfgs
-    lbfgs(points.size(), x, &fx, evaluate, progress, this, &param);
-
-    // Copy the optimized weights
-    std::vector<double> new_weights;
-    for (size_t i = 0; i < points.size(); i++) {
-      new_weights.push_back(x[i]);
-    }
-
-    // Don't forget to free the memory
-    lbfgs_free(x);
-
-    // Return the optimized weights
-    return new_weights;
   }
 
   void optimize_for_liquid() {
@@ -499,9 +373,10 @@ public:
     lbfgs_parameter_t param;
 
     // Initialize the weights
-    for (size_t i = 0; i < nb_liquid + 1; i++) {
-      x[i] = 0.1;
+    for (size_t i = 0; i < nb_liquid; i++) {
+      x[i] = weights[i];
     }
+    x[nb_liquid] = air_weight;
     // Do the parameter thing
     lbfgs_parameter_init(&param);
 
@@ -526,7 +401,7 @@ public:
 
   std::vector<Polygon> generate_voronoi() {
     std::vector<Polygon> voronoi(points.size());
-    std::vector<std::thread> threads(N_THREADS-1);
+    std::vector<std::thread> threads(N_THREADS - 1);
     size_t block_size = points.size() / N_THREADS;
     for (int n_thread = 0; n_thread < N_THREADS - 1; n_thread++) {
       threads[n_thread] = std::thread([this, n_thread, block_size, &voronoi]() {
@@ -554,49 +429,15 @@ public:
     return voronoi;
   }
 
-  static lbfgsfloatval_t evaluate( // contains extra parameters
-      void *instance,
-      const lbfgsfloatval_t *x,
-      lbfgsfloatval_t *g,
-      const int n,
-      const lbfgsfloatval_t step) {
-    // x is W, g is where i put gradient, n is the dimension? step i don't think i care
-    // return g(W) ?
-    (void)step;
-    PointCloud pc = *(PointCloud *)(instance);
-    if ((size_t)n != pc.lambda.size()) {
-      std::cout << "Error: n and lambda size do not match" << std::endl;
-      return -1;
+  std::vector<Polygon> generate_voronoi_liquid() {
+    std::vector<Polygon> init = generate_voronoi();
+    for (size_t i = 0; i < nb_liquid; i++) {
+      init[i] = clip_by_polygon(init[i], disk(points[i], sqrt(weights[i] - air_weight)));
     }
-    for (int i = 0; i < n; i++) {
-      pc.weights[i] = x[i];
-    }
-
-    // We have the point cloud, now we can calculate the voronoi diagram
-    std::vector<Polygon> voronoi = pc.generate_voronoi();
-    // say the weights
-    lbfgsfloatval_t fx = 0.0;
-    // We make the actual computations
-    for (int i = 0; i < n; i++) {
-      double v_area = 0;
-      // We add integral of ||x - yi||^2 for each i
-      for (Polygon tri : triangulate(voronoi[i])) {
-        double T = triangle_area(tri);
-        v_area += T;
-        for (int k = 0; k < 3; k++) {
-          for (int l = k; l < 3; l++) {
-            fx += (T / 6) * dot(tri.vertices[k] - pc.points[i], tri.vertices[l] - pc.points[i]);
-          }
-        }
-      }
-      // Finally
-      g[i] = -(-v_area + pc.lambda[i]);
-      fx += -v_area * x[i] + pc.lambda[i] * x[i];
-    }
-    return -fx;
+    return init;
   }
 
-  static Polygon disk(Vector origin, double radius, int n = 50) {
+  static Polygon disk(Vector origin, double radius, int n = 30) {
     // Take 30 sides
     std::vector<Vector> vertices;
     for (int i = 0; i < n; i++) {
@@ -619,21 +460,17 @@ public:
     for (int i = 0; i < pc.nb_liquid; i++) {
       pc.weights[i] = x[i];
     }
-    for (int i = pc.nb_liquid; i < pc.points.size(); i++) {
-      pc.weights[i] = x[pc.nb_liquid];
-    }
-
+    pc.air_weight = x[pc.nb_liquid];
     // We have the point cloud, now we can calculate the voronoi diagram
-    std::vector<Polygon> voronoi = pc.generate_voronoi();
+    std::vector<Polygon> voronoi = pc.generate_voronoi_liquid();
     // say the weights
     lbfgsfloatval_t fx = 0.0;
     // We make the actual computations
     double total_liquid_area = 0;
     for (int i = 0; i < pc.nb_liquid; i++) {
-      Polygon intersected_cell = clip_by_polygon(voronoi[i], disk(pc.points[i], sqrt(x[i] - x[pc.nb_liquid])));
       double v_area = 0;
       // We add integral of ||x - yi||^2 for each i
-      for (Polygon tri : triangulate(intersected_cell)) {
+      for (Polygon tri : triangulate(voronoi[i])) {
         double T = triangle_area(tri);
         v_area += T;
         for (int k = 0; k < 3; k++) {
@@ -649,45 +486,46 @@ public:
     }
     double air_area = 1 - total_liquid_area;
     fx += x[pc.nb_liquid] * (1 - pc.liquid_proportion - air_area);
-    g[pc.nb_liquid] = pc.liquid_proportion / pc.nb_liquid - air_area;
+    g[pc.nb_liquid] = -(pc.liquid_proportion / pc.nb_liquid - air_area);
     return -fx;
   }
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
-  static int progress(
-      void *instance,
-      const lbfgsfloatval_t *x,
-      const lbfgsfloatval_t *g,
-      const lbfgsfloatval_t fx,
-      const lbfgsfloatval_t xnorm,
-      const lbfgsfloatval_t gnorm,
-      const lbfgsfloatval_t step,
-      int n,
-      int k,
-      int ls) {
-
-    /*
-    printf("Iteration %d:\n", k);
-    printf("  fx = %f", fx);
-    printf("  xnorm = %f, gnorm = %f, step = %f\n", xnorm, gnorm, step);
-    printf("\n");*/
+  static int progress(void *instance, const lbfgsfloatval_t *x, const lbfgsfloatval_t *g, const lbfgsfloatval_t fx, const lbfgsfloatval_t xnorm, const lbfgsfloatval_t gnorm, const lbfgsfloatval_t step, int n, int k, int ls) {
     return 0;
   }
 #pragma GCC diagnostic pop
 };
 
-bool in_circle(Vector point) {
-  return (point - Vector(0.5, 0.5)).norm() < 0.3;
+std::vector<Vector> semi_donut(int N) {
+  std::vector<Vector> points;
+  // 0.2 air, 0.15 liquid, 0.3 air, 0.15 liquid, 0.2 air
+  // semicircumference: 0.5 to 1 (a bit less), say 0.75, width: 0.15
+  // n_per_radius*n_per_width = N && n_per_radius / 0.75 = n_per_width / 0.15
+  // n_per_radius = 0.75 * n_per_width / 0.15 = 5 * n_per_width
+  int n_per_width = std::floor(sqrt(N / 5));
+  int n_per_radius = 5 * n_per_width;
+  for (int i = 0; i < n_per_width; i++) {
+    double radius = 0.15 + 0.15 * i / (n_per_width - 1);
+    int per_radius = n_per_radius;
+    if (i == n_per_width - 1) {
+      per_radius = N - n_per_radius * (n_per_width - 1);
+    }
+    for (int j = 0; j < per_radius; j++) {
+      double angle = 3.141592653589793238 * j / per_radius;
+      points.push_back(Vector(0.5 + radius * cos(angle), 0.5 + radius * sin(angle)));
+    }
+  }
+  return points;
 }
 
 int main() {
   // Create particles cloud
-  std::vector<Vector> particles = {Vector(0.3, 0.5), Vector(0.2, 0.2), Vector(0.8, 0.2), Vector(0.8, 0.8), Vector(0.2, 0.8)};
-  PointCloud pc(0.4, 1001); // TODO when 400 crash at some point
-  pc.select(in_circle);
+  PointCloud pc(0.15, 300, semi_donut);
+
   // Create animation
-  pc.animate(10, 0.004, 0.1, 200);
+  pc.animate(50, 0.004, 0.03, 200);
   std::cout << "Finished" << std::endl;
 
   return 0;
