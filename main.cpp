@@ -2,8 +2,10 @@
 #include "lbfgs.c"
 #include <cmath>
 #include <iostream>
+#include <random>
 #include <string>
 #include <vector>
+#include <ctime>
 
 class Vector {
 public:
@@ -70,77 +72,78 @@ public:
   Polygon(std::vector<Vector> vertices = {}) : vertices(vertices) {}
 };
 
-//New saver for PNG
+// New saver for PNG
 #include <sstream>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
- 
+
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 void save_frame(const std::vector<Polygon> &cells, std::string filename, int N, int frameid = 0) {
-        int W = 1000, H = 1000;
-        std::vector<unsigned char> image(W*H * 3, 255);
+  int W = 1000, H = 1000;
+  std::vector<unsigned char> image(W * H * 3, 255);
 #pragma omp parallel for schedule(dynamic)
-        for (int i = 0; i < cells.size(); i++) {
- 
-            double bminx = 1E9, bminy = 1E9, bmaxx = -1E9, bmaxy = -1E9;
-            for (int j = 0; j < cells[i].vertices.size(); j++) {
-                bminx = std::min(bminx, cells[i].vertices[j][0]);
-                bminy = std::min(bminy, cells[i].vertices[j][1]);
-                bmaxx = std::max(bmaxx, cells[i].vertices[j][0]);
-                bmaxy = std::max(bmaxy, cells[i].vertices[j][1]);
-            }
-            bminx = std::min(W-1., std::max(0., W * bminx));
-            bminy = std::min(H-1., std::max(0., H * bminy));
-            bmaxx = std::max(W-1., std::max(0., W * bmaxx));
-            bmaxy = std::max(H-1., std::max(0., H * bmaxy));
- 
-            for (int y = bminy; y < bmaxy; y++) {
-                for (int x = bminx; x < bmaxx; x++) {
-                    int prevSign = 0;
-                    bool isInside = true;
-                    double mindistEdge = 1E9;
-                    for (int j = 0; j < cells[i].vertices.size(); j++) {
-                        double x0 = cells[i].vertices[j][0] * W;
-                        double y0 = cells[i].vertices[j][1] * H;
-                        double x1 = cells[i].vertices[(j + 1) % cells[i].vertices.size()][0] * W;
-                        double y1 = cells[i].vertices[(j + 1) % cells[i].vertices.size()][1] * H;
-                        double det = (x - x0)*(y1-y0) - (y - y0)*(x1-x0);
-                        int sign = det/std::abs(det);
-                        if (prevSign == 0) prevSign = sign; else
-                            if (sign == 0) sign = prevSign; else
-                            if (sign != prevSign) {
-                                isInside = false;
-                                break;
-                            }
-                        prevSign = sign;
-                        double edgeLen = sqrt((x1 - x0)*(x1 - x0) + (y1 - y0)*(y1 - y0));
-                        double distEdge = std::abs(det)/ edgeLen;
-                        double dotp = (x - x0)*(x1 - x0) + (y - y0)*(y1 - y0);
-                        if (dotp<0 || dotp>edgeLen*edgeLen) distEdge = 1E9;
-                        mindistEdge = std::min(mindistEdge, distEdge);
-                    }
-                    if (isInside) {
-                        if (i < N) {   // the N first particles may represent fluid, displayed in blue
-                          image[((H - y - 1)*W + x) * 3] = 0;
-                          image[((H - y - 1)*W + x) * 3 + 1] = 0;
-                          image[((H - y - 1)*W + x) * 3 + 2] = 255;
-                        }
-                        if (mindistEdge <= 2) {
-                            image[((H - y - 1)*W + x) * 3] = 0;
-                            image[((H - y - 1)*W + x) * 3 + 1] = 0;
-                            image[((H - y - 1)*W + x) * 3 + 2] = 0;
-                        }
- 
-                    }
-                    
-                }
-            }
-        }
-        std::ostringstream os;
-        os << filename << frameid << ".png";
-        stbi_write_png(os.str().c_str(), W, H, 3, &image[0], 0);
+  for (int i = 0; i < cells.size(); i++) {
+
+    double bminx = 1E9, bminy = 1E9, bmaxx = -1E9, bmaxy = -1E9;
+    for (int j = 0; j < cells[i].vertices.size(); j++) {
+      bminx = std::min(bminx, cells[i].vertices[j][0]);
+      bminy = std::min(bminy, cells[i].vertices[j][1]);
+      bmaxx = std::max(bmaxx, cells[i].vertices[j][0]);
+      bmaxy = std::max(bmaxy, cells[i].vertices[j][1]);
     }
+    bminx = std::min(W - 1., std::max(0., W * bminx));
+    bminy = std::min(H - 1., std::max(0., H * bminy));
+    bmaxx = std::max(W - 1., std::max(0., W * bmaxx));
+    bmaxy = std::max(H - 1., std::max(0., H * bmaxy));
+
+    for (int y = bminy; y < bmaxy; y++) {
+      for (int x = bminx; x < bmaxx; x++) {
+        int prevSign = 0;
+        bool isInside = true;
+        double mindistEdge = 1E9;
+        for (int j = 0; j < cells[i].vertices.size(); j++) {
+          double x0 = cells[i].vertices[j][0] * W;
+          double y0 = cells[i].vertices[j][1] * H;
+          double x1 = cells[i].vertices[(j + 1) % cells[i].vertices.size()][0] * W;
+          double y1 = cells[i].vertices[(j + 1) % cells[i].vertices.size()][1] * H;
+          double det = (x - x0) * (y1 - y0) - (y - y0) * (x1 - x0);
+          int sign = det / std::abs(det);
+          if (prevSign == 0)
+            prevSign = sign;
+          else if (sign == 0)
+            sign = prevSign;
+          else if (sign != prevSign) {
+            isInside = false;
+            break;
+          }
+          prevSign = sign;
+          double edgeLen = sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
+          double distEdge = std::abs(det) / edgeLen;
+          double dotp = (x - x0) * (x1 - x0) + (y - y0) * (y1 - y0);
+          if (dotp < 0 || dotp > edgeLen * edgeLen)
+            distEdge = 1E9;
+          mindistEdge = std::min(mindistEdge, distEdge);
+        }
+        if (isInside) {
+          if (i < N) { // the N first particles may represent fluid, displayed in blue
+            image[((H - y - 1) * W + x) * 3] = 0;
+            image[((H - y - 1) * W + x) * 3 + 1] = 0;
+            image[((H - y - 1) * W + x) * 3 + 2] = 255;
+          }
+          if (mindistEdge <= 2) {
+            image[((H - y - 1) * W + x) * 3] = 0;
+            image[((H - y - 1) * W + x) * 3 + 1] = 0;
+            image[((H - y - 1) * W + x) * 3 + 2] = 0;
+          }
+        }
+      }
+    }
+  }
+  std::ostringstream os;
+  os << filename << frameid << ".png";
+  stbi_write_png(os.str().c_str(), W, H, 3, &image[0], 0);
+}
 
 // saves a static svg file. The polygon vertices are supposed to be in the range [0..1], and a canvas of size 1000x1000 is created
 void save_svg(const std::vector<Polygon> &polygons, std::string filename, std::string fillcol = "none") {
@@ -310,6 +313,10 @@ public:
   std::vector<Vector> points;
   std::vector<double> weights;
   std::vector<double> lambda; // Wanted area of the voronoi cell
+  std::vector<Vector> velocities;
+  int N_particles;
+  int nb_liquid = 0;
+  double liquid_proportion = 0.1;
 
   PointCloud(std::vector<Vector> points) : points(points) {
     for (size_t i = 0; i < points.size(); i++) {
@@ -322,8 +329,80 @@ public:
     }
     optimize_for_lambda(lambda_);
   }
+  PointCloud(double liquid_proportion, int N_part) :  N_particles(N_part), liquid_proportion(liquid_proportion) {
+    if (liquid_proportion <= 0 || liquid_proportion >= 1) {
+      std::cout << "Error: proportion must be between 0 and 1" << std::endl;
+      throw "Error: proportion must be between 0 and 1";
+    }
+    // Generate points randomly
+    nb_liquid = std::floor(N_part * liquid_proportion);
+    std::mt19937 generator(std::clock());
+    std::uniform_real_distribution<double> pos(0, 1);
+    for (int i = 0; i < N_particles; i++) {
+      points.push_back(Vector(pos(generator), pos(generator)));
+      weights.push_back(1);
+    }
+    // Lloyd iterations
+    int n_lloyd = 10;
+    if (points.size() > 1000) {
+      n_lloyd = 5;
+      if (points.size() > 10000) {
+        n_lloyd = 3;
+      }
+    }
+    if (points.size() <= 400) {
+      n_lloyd = 30;
+    }
+    for (int i = 0; i < n_lloyd; ++i){
+      lloyd();
+      if (i % (n_lloyd/10) == 0) {
+        std::cout << "Lloyd iteration " << (double)100.0*i/n_lloyd << "%" << std::endl;
+      }
+    }
+    std::cout << "Lloyd done" << std::endl;
 
-  void optimize_for_lambda(std::vector<double> lambda_){
+    for (size_t i = 0; i < nb_liquid; i++) {
+      velocities.push_back(Vector(0, 0));
+    }
+  }
+
+  void lloyd(){
+    std::vector<Polygon> voron = generate_voronoi();
+    std::vector<Vector> new_points;
+    for (size_t i = 0; i < points.size(); i++) {
+      Polygon voronoi_cell = voron[i];
+      double area = 0;
+      Vector centroid = Vector(0, 0);
+      for (int j = 0; j < voronoi_cell.vertices.size()-1; j++) {
+        Polygon tri = Polygon({points[i], voronoi_cell.vertices[j], voronoi_cell.vertices[j+1]});
+        double T = triangle_area(tri);
+        area += T;
+        centroid = centroid + T * (tri.vertices[0] + tri.vertices[1] + tri.vertices[2]) / 3;
+      }
+      centroid = centroid / area;
+      new_points.push_back(centroid + (centroid-points[i])*0.3); // Over relax
+    }
+    points = new_points;
+  } 
+
+  void select(bool (*selection) (Vector)){
+    std::vector<Vector> new_points;
+    nb_liquid = 0;
+    for (size_t i = 0; i < points.size(); i++) {
+      if (selection(points[i])){
+        new_points.push_back(points[i]);
+        ++nb_liquid;
+      }
+    }
+    for (size_t i = 0; i < points.size(); i++) {
+      if (!selection(points[i])){
+        new_points.push_back(points[i]);
+      }
+    }
+    points = new_points;
+  }
+
+  void optimize_for_lambda(std::vector<double> lambda_) {
     set_lambda(lambda_);
     std::vector<double> new_weights = optimize();
     for (size_t i = 0; i < points.size(); i++) {
@@ -377,6 +456,38 @@ public:
 
     // Return the optimized weights
     return new_weights;
+  }
+
+  void optimize_for_liquid() {
+    // We want to optimize the weights
+    lbfgsfloatval_t fx;
+    lbfgsfloatval_t *x = lbfgs_malloc(nb_liquid+1); // 1 for air
+    lbfgs_parameter_t param;
+
+    // Initialize the weights
+    for (size_t i = 0; i < nb_liquid + 1; i++) {
+      x[i] = 0.1;
+    }
+    // Do the parameter thing
+    lbfgs_parameter_init(&param);
+
+    // Call lbfgs
+    lbfgs(nb_liquid, x, &fx, evaluate_liquid, progress, this, &param);
+
+    // Copy the optimized weights
+    std::vector<double> new_weights;
+    for (size_t i = 0; i < nb_liquid; i++) {
+      new_weights.push_back(x[i]);
+    }
+    for (size_t i = nb_liquid; i < points.size(); i++) {
+      new_weights.push_back(x[nb_liquid]);
+    }
+
+    // Don't forget to free the memory
+    lbfgs_free(x);
+
+    // Write the optimized weights
+    weights = new_weights;
   }
 
   std::vector<Polygon> generate_voronoi() {
@@ -435,6 +546,63 @@ public:
     return -fx;
   }
 
+  static Polygon disk(Vector origin, double radius, int n = 50){
+    // Take 30 sides
+    std::vector<Vector> vertices;
+    for (int i = 0; i < n; i++){
+      double angle = 2*3.141592653289793236*i/n;
+      vertices.push_back(Vector(origin[0] + radius*cos(angle), origin[1] + radius*sin(angle)));
+    }
+    return Polygon(vertices);
+  }
+
+  static lbfgsfloatval_t evaluate_liquid( // contains extra parameters
+      void *instance,
+      const lbfgsfloatval_t *x,
+      lbfgsfloatval_t *g,
+      const int n,
+      const lbfgsfloatval_t step) {
+    // x is W, g is where i put gradient, n is the dimension? step i don't think i care
+    // return g(W) ?
+    (void)step;
+    PointCloud pc = *(PointCloud *)(instance);
+    for (int i = 0; i < pc.nb_liquid; i++) {
+      pc.weights[i] = x[i];
+    }
+    for (int i = pc.nb_liquid; i < pc.points.size(); i++) {
+      pc.weights[i] = x[pc.nb_liquid];
+    }
+
+    // We have the point cloud, now we can calculate the voronoi diagram
+    std::vector<Polygon> voronoi = pc.generate_voronoi();
+    // say the weights
+    lbfgsfloatval_t fx = 0.0;
+    // We make the actual computations
+    double total_liquid_area = 0;
+    for (int i = 0; i < pc.nb_liquid; i++) {
+      Polygon intersected_cell = clip_by_polygon(voronoi[i], disk(pc.points[i], sqrt(x[i] - x[pc.nb_liquid])));
+      double v_area = 0;
+      // We add integral of ||x - yi||^2 for each i
+      for (Polygon tri : triangulate(intersected_cell)) {
+        double T = triangle_area(tri);
+        v_area += T;
+        for (int k = 0; k < 3; k++) {
+          for (int l = k; l < 3; l++) {
+            fx += (T / 6) * dot(tri.vertices[k] - pc.points[i], tri.vertices[l] - pc.points[i]);
+          }
+        }
+      }
+      total_liquid_area += v_area;
+      // Finally
+      g[i] = -(pc.liquid_proportion/pc.nb_liquid -v_area);
+      fx += -v_area * x[i] + pc.liquid_proportion/pc.nb_liquid * x[i];
+    }
+    double air_area = 1 - total_liquid_area;
+    fx += x[pc.nb_liquid] * (1 - pc.liquid_proportion - air_area);
+    g[pc.nb_liquid] = pc.liquid_proportion/pc.nb_liquid - air_area;
+    return -fx;
+  }
+
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-parameter"
   static int progress(
@@ -459,19 +627,18 @@ public:
 #pragma GCC diagnostic pop
 };
 
+bool in_circle(Vector point) {
+  return (point - Vector(0.5, 0.5)).norm() < 0.3;
+}
+
 int main() {
   // Create particles cloud
   std::vector<Vector> particles = {Vector(0.3, 0.5), Vector(0.2, 0.2), Vector(0.8, 0.2), Vector(0.8, 0.8), Vector(0.2, 0.8)};
-  PointCloud pc(particles);
-  std::vector<double> lambda;
-  double fluid_proportion = 0.4;
-  for (size_t i = 0; i < particles.size(); ++i){
-    lambda.push_back(fluid_proportion/particles.size()); // We fix the weight of liquid particles
-  }
-  pc.optimize_for_lambda(lambda);
+  PointCloud pc(0.4, 400);
+  pc.select(in_circle);
   // Create voronoi diagram
   std::vector<Polygon> voronoi = pc.generate_voronoi();
-  save_svg(voronoi, "voronoi.svg");
+  save_frame(voronoi, "voronoi", pc.nb_liquid, 0);
   std::cout << "Finished" << std::endl;
 
   return 0;
