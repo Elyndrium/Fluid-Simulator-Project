@@ -81,13 +81,9 @@ public:
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
-void save_frame(const std::vector<Polygon> &cells, std::string filename, int N, int frameid = 0) {
-  int W = 1000, H = 1000;
-  std::vector<unsigned char> image(W * H * 3, 255);
-#pragma omp parallel for schedule(dynamic)
-  for (int i = 0; i < cells.size(); i++) {
 
-    double bminx = 1E9, bminy = 1E9, bmaxx = -1E9, bmaxy = -1E9;
+void save_line(size_t i, std::vector<unsigned char> &image, const std::vector<Polygon> &cells, int W, int H, int N) {
+  double bminx = 1E9, bminy = 1E9, bmaxx = -1E9, bmaxy = -1E9;
     for (int j = 0; j < cells[i].vertices.size(); j++) {
       bminx = std::min(bminx, cells[i].vertices[j][0]);
       bminy = std::min(bminy, cells[i].vertices[j][1]);
@@ -141,6 +137,25 @@ void save_frame(const std::vector<Polygon> &cells, std::string filename, int N, 
         }
       }
     }
+}
+
+void save_lines(size_t i0, size_t size, std::vector<unsigned char> &image, const std::vector<Polygon> &cells, int W, int H, int N) {
+  for (size_t i = i0; i < i0 + size; i++) {
+    save_line(i, image, cells, W, H, N);
+  }
+}
+
+void save_frame(const std::vector<Polygon> &cells, std::string filename, int N, int frameid = 0) {
+  int W = 1000, H = 1000;
+  std::vector<unsigned char> image(W * H * 3, 255);
+  std::vector<std::thread> threads(N_THREADS - 1);
+  size_t block_size = N / N_THREADS;
+  for (int n_thread = 0; n_thread < N_THREADS - 1; n_thread++) {
+    threads[n_thread] = std::thread(&save_lines, n_thread * block_size, block_size, std::ref(image), cells, W, H, N);
+  }
+  save_lines((N_THREADS - 1) * block_size, N - (N_THREADS - 1) * block_size, std::ref(image), cells, W, H, N);
+  for (int n_thread = 0; n_thread < N_THREADS - 1; n_thread++) {
+    threads[n_thread].join();
   }
   std::ostringstream os;
   os << filename << frameid << ".png";
@@ -325,13 +340,19 @@ public:
 
   void animate(int nb_frames, double epsilon, double dt, double mass) {
     for (int i = 0; i < nb_frames; ++i) {
+      // Optimization and save time is the long part
+      auto start = std::chrono::high_resolution_clock::now();
       optimize_for_liquid();
+      auto end = std::chrono::high_resolution_clock::now();
       std::vector<Polygon> voronoi = generate_voronoi_liquid();
+      auto start2 = std::chrono::high_resolution_clock::now();
       save_frame(voronoi, "animation", nb_liquid, i);
+      auto end2 = std::chrono::high_resolution_clock::now();
       std::cout << "Frame " << i << std::endl;
       time_step_post_optimization(epsilon, dt, mass, voronoi);
+      std::cout << "Optimization time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms\n" << "Save time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end2 - start2).count() << "ms\n" << std::endl;
       // TODO remove redundant generate_voronoi
-      // TODO time functions
+      // TODO parallelize more
     }
   }
 
@@ -514,7 +535,7 @@ std::vector<Vector> semi_donut(int N) {
     }
     for (int j = 0; j < per_radius; j++) {
       double angle = 3.141592653589793238 * j / per_radius;
-      points.push_back(Vector(0.5 + radius * cos(angle), 0.5 + radius * sin(angle)));
+      points.push_back(Vector(0.5 - radius * cos(angle), 0.5 - radius * sin(angle)));
     }
   }
   return points;
@@ -522,7 +543,7 @@ std::vector<Vector> semi_donut(int N) {
 
 int main() {
   // Create particles cloud
-  PointCloud pc(0.15, 300, semi_donut);
+  PointCloud pc(0.15, 200, semi_donut);
 
   // Create animation
   pc.animate(50, 0.004, 0.03, 200);
