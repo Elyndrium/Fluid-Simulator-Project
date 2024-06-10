@@ -1,11 +1,13 @@
 // include necessary libraries
 #include "lbfgs.c"
 #include <cmath>
+#include <ctime>
 #include <iostream>
 #include <random>
 #include <string>
+#include <thread>
 #include <vector>
-#include <ctime>
+#define N_THREADS 16
 
 class Vector {
 public:
@@ -329,7 +331,7 @@ public:
     }
     optimize_for_lambda(lambda_);
   }
-  PointCloud(double liquid_proportion, int N_part) :  N_particles(N_part), liquid_proportion(liquid_proportion) {
+  PointCloud(double liquid_proportion, int N_part) : N_particles(N_part), liquid_proportion(liquid_proportion) {
     if (liquid_proportion <= 0 || liquid_proportion >= 1) {
       std::cout << "Error: proportion must be between 0 and 1" << std::endl;
       throw "Error: proportion must be between 0 and 1";
@@ -353,10 +355,10 @@ public:
     if (points.size() <= 400) {
       n_lloyd = 30;
     }
-    for (int i = 0; i < n_lloyd; ++i){
+    for (int i = 0; i < n_lloyd; ++i) {
       lloyd();
-      if (i % (n_lloyd/10) == 0) {
-        std::cout << "Lloyd iteration " << (double)100.0*i/n_lloyd << "%" << std::endl;
+      if (n_lloyd < 10 || i % (n_lloyd / 10) == 0) {
+        std::cout << "Lloyd iteration " << (double)100.0 * i / n_lloyd << "%" << std::endl;
       }
     }
     std::cout << "Lloyd done" << std::endl;
@@ -366,36 +368,36 @@ public:
     }
   }
 
-  void lloyd(){
+  void lloyd() {
     std::vector<Polygon> voron = generate_voronoi();
     std::vector<Vector> new_points;
     for (size_t i = 0; i < points.size(); i++) {
       Polygon voronoi_cell = voron[i];
       double area = 0;
       Vector centroid = Vector(0, 0);
-      for (int j = 0; j < voronoi_cell.vertices.size()-1; j++) {
-        Polygon tri = Polygon({points[i], voronoi_cell.vertices[j], voronoi_cell.vertices[j+1]});
+      for (int j = 0; j < voronoi_cell.vertices.size() - 1; j++) {
+        Polygon tri = Polygon({points[i], voronoi_cell.vertices[j], voronoi_cell.vertices[j + 1]});
         double T = triangle_area(tri);
         area += T;
         centroid = centroid + T * (tri.vertices[0] + tri.vertices[1] + tri.vertices[2]) / 3;
       }
       centroid = centroid / area;
-      new_points.push_back(centroid + (centroid-points[i])*0.3); // Over relax
+      new_points.push_back(centroid + (centroid - points[i]) * 0.3); // Over relax
     }
     points = new_points;
-  } 
+  }
 
-  void select(bool (*selection) (Vector)){
+  void select(bool (*selection)(Vector)) {
     std::vector<Vector> new_points;
     nb_liquid = 0;
     for (size_t i = 0; i < points.size(); i++) {
-      if (selection(points[i])){
+      if (selection(points[i])) {
         new_points.push_back(points[i]);
         ++nb_liquid;
       }
     }
     for (size_t i = 0; i < points.size(); i++) {
-      if (!selection(points[i])){
+      if (!selection(points[i])) {
         new_points.push_back(points[i]);
       }
     }
@@ -429,6 +431,38 @@ public:
     }
   }
 
+  void animate(int nb_frames, double epsilon, double dt, double mass) {
+    for (int i = 0; i < nb_frames; ++i) {
+      optimize_for_liquid();
+      std::vector<Polygon> voronoi = generate_voronoi();
+      save_frame(voronoi, "animation", nb_liquid, i);
+      std::cout << "Frame " << i << std::endl;
+      time_step_post_optimization(epsilon, dt, mass, voronoi);
+      // TODO FORCE STAY INSIDE 0, 1
+      // TODO lloyd the air particles (probably?)
+    }
+  }
+
+  void time_step_post_optimization(double epsilon, double dt, double mass, std::vector<Polygon> voronoi) {
+    for (int i = 0; i < nb_liquid; ++i) {
+      Polygon drop = voronoi[i];
+      Vector centroid = Vector(0, 0);
+      double area = 0;
+      for (int j = 0; j < drop.vertices.size() - 1; j++) {
+        Polygon tri = Polygon({points[i], drop.vertices[j], drop.vertices[j + 1]});
+        double T = triangle_area(tri);
+        area += T;
+        centroid = centroid + T * (tri.vertices[0] + tri.vertices[1] + tri.vertices[2]) / 3;
+      }
+      centroid = centroid / area;
+      // Actual computations
+      Vector fi_spring = (centroid - points[i]) / pow(epsilon, 2);
+      Vector fi = fi_spring + mass * Vector(0, -9.81); // Gravity
+      velocities[i] = velocities[i] + dt * fi / mass;
+      points[i] = points[i] + dt * velocities[i];
+    }
+  }
+
   std::vector<double> optimize() {
     // We want to optimize the weights
     lbfgsfloatval_t fx;
@@ -437,7 +471,7 @@ public:
 
     // Initialize the weights
     for (size_t i = 0; i < points.size(); i++) {
-      x[i] = 0.1;
+      x[i] = weights[i];
     }
     // Do the parameter thing
     lbfgs_parameter_init(&param);
@@ -461,7 +495,7 @@ public:
   void optimize_for_liquid() {
     // We want to optimize the weights
     lbfgsfloatval_t fx;
-    lbfgsfloatval_t *x = lbfgs_malloc(nb_liquid+1); // 1 for air
+    lbfgsfloatval_t *x = lbfgs_malloc(nb_liquid + 1); // 1 for air
     lbfgs_parameter_t param;
 
     // Initialize the weights
@@ -491,15 +525,31 @@ public:
   }
 
   std::vector<Polygon> generate_voronoi() {
-    std::vector<Polygon> voronoi;
-    for (size_t i = 0; i < points.size(); i++) {
-      Polygon voronoi_cell = Polygon({Vector(0, 0), Vector(1, 0), Vector(1, 1), Vector(0, 1)});
+    std::vector<Polygon> voronoi(points.size());
+    std::vector<std::thread> threads(N_THREADS-1);
+    size_t block_size = points.size() / N_THREADS;
+    for (int n_thread = 0; n_thread < N_THREADS - 1; n_thread++) {
+      threads[n_thread] = std::thread([this, n_thread, block_size, &voronoi]() {
+        for (size_t i = n_thread * block_size; i < (n_thread + 1) * block_size; i++) {
+          voronoi[i] = Polygon({Vector(0, 0), Vector(1, 0), Vector(1, 1), Vector(0, 1)});
+          for (size_t j = 0; j < points.size(); j++) {
+            if (i != j) {
+              voronoi[i] = clip_by_bissec_voronoi(voronoi[i], points[i], points[j], weights[i], weights[j]);
+            }
+          }
+        }
+      });
+    }
+    for (size_t i = (N_THREADS - 1) * block_size; i < points.size(); i++) {
+      voronoi[i] = Polygon({Vector(0, 0), Vector(1, 0), Vector(1, 1), Vector(0, 1)});
       for (size_t j = 0; j < points.size(); j++) {
         if (i != j) {
-          voronoi_cell = clip_by_bissec_voronoi(voronoi_cell, points[i], points[j], weights[i], weights[j]);
+          voronoi[i] = clip_by_bissec_voronoi(voronoi[i], points[i], points[j], weights[i], weights[j]);
         }
       }
-      voronoi.push_back(voronoi_cell);
+    }
+    for (int n_thread = 0; n_thread < N_THREADS - 1; n_thread++) {
+      threads[n_thread].join();
     }
     return voronoi;
   }
@@ -546,12 +596,12 @@ public:
     return -fx;
   }
 
-  static Polygon disk(Vector origin, double radius, int n = 50){
+  static Polygon disk(Vector origin, double radius, int n = 50) {
     // Take 30 sides
     std::vector<Vector> vertices;
-    for (int i = 0; i < n; i++){
-      double angle = 2*3.141592653289793236*i/n;
-      vertices.push_back(Vector(origin[0] + radius*cos(angle), origin[1] + radius*sin(angle)));
+    for (int i = 0; i < n; i++) {
+      double angle = 2 * 3.141592653289793236 * i / n;
+      vertices.push_back(Vector(origin[0] + radius * cos(angle), origin[1] + radius * sin(angle)));
     }
     return Polygon(vertices);
   }
@@ -594,12 +644,12 @@ public:
       }
       total_liquid_area += v_area;
       // Finally
-      g[i] = -(pc.liquid_proportion/pc.nb_liquid -v_area);
-      fx += -v_area * x[i] + pc.liquid_proportion/pc.nb_liquid * x[i];
+      g[i] = -(pc.liquid_proportion / pc.nb_liquid - v_area);
+      fx += -v_area * x[i] + pc.liquid_proportion / pc.nb_liquid * x[i];
     }
     double air_area = 1 - total_liquid_area;
     fx += x[pc.nb_liquid] * (1 - pc.liquid_proportion - air_area);
-    g[pc.nb_liquid] = pc.liquid_proportion/pc.nb_liquid - air_area;
+    g[pc.nb_liquid] = pc.liquid_proportion / pc.nb_liquid - air_area;
     return -fx;
   }
 
@@ -634,11 +684,10 @@ bool in_circle(Vector point) {
 int main() {
   // Create particles cloud
   std::vector<Vector> particles = {Vector(0.3, 0.5), Vector(0.2, 0.2), Vector(0.8, 0.2), Vector(0.8, 0.8), Vector(0.2, 0.8)};
-  PointCloud pc(0.4, 400);
+  PointCloud pc(0.4, 1001); // TODO when 400 crash at some point
   pc.select(in_circle);
-  // Create voronoi diagram
-  std::vector<Polygon> voronoi = pc.generate_voronoi();
-  save_frame(voronoi, "voronoi", pc.nb_liquid, 0);
+  // Create animation
+  pc.animate(10, 0.004, 0.1, 200);
   std::cout << "Finished" << std::endl;
 
   return 0;
