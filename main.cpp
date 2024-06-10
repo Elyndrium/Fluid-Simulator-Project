@@ -351,7 +351,6 @@ public:
       std::cout << "Frame " << i << std::endl;
       time_step_post_optimization(epsilon, dt, mass, voronoi);
       std::cout << "Optimization time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << "ms\n" << "Save time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end2 - start2).count() << "ms\n" << std::endl;
-      // TODO remove redundant generate_voronoi
       // TODO parallelize more
     }
   }
@@ -528,7 +527,7 @@ std::vector<Vector> semi_donut(int N) {
   int n_per_width = std::floor(sqrt(N / 5));
   int n_per_radius = 5 * n_per_width;
   for (int i = 0; i < n_per_width; i++) {
-    double radius = 0.15 + 0.15 * i / (n_per_width - 1);
+    double radius = 0.15 + 0.20 * i / (n_per_width - 1);
     int per_radius = n_per_radius;
     if (i == n_per_width - 1) {
       per_radius = N - n_per_radius * (n_per_width - 1);
@@ -543,10 +542,10 @@ std::vector<Vector> semi_donut(int N) {
 
 int main() {
   // Create particles cloud
-  PointCloud pc(0.15, 200, semi_donut);
+  PointCloud pc(0.25, 600, semi_donut);
 
   // Create animation
-  pc.animate(50, 0.004, 0.03, 200);
+  pc.animate(70, 0.004, 0.025, 200);
   std::cout << "Finished" << std::endl;
 
   return 0;
