@@ -8,6 +8,7 @@
 #include <thread>
 #include <vector>
 #define N_THREADS 16
+#define N_THREADS_EVALUATE 4
 
 class Vector {
 public:
@@ -84,59 +85,59 @@ public:
 
 void save_line(size_t i, std::vector<unsigned char> &image, const std::vector<Polygon> &cells, int W, int H, int N) {
   double bminx = 1E9, bminy = 1E9, bmaxx = -1E9, bmaxy = -1E9;
-    for (int j = 0; j < cells[i].vertices.size(); j++) {
-      bminx = std::min(bminx, cells[i].vertices[j][0]);
-      bminy = std::min(bminy, cells[i].vertices[j][1]);
-      bmaxx = std::max(bmaxx, cells[i].vertices[j][0]);
-      bmaxy = std::max(bmaxy, cells[i].vertices[j][1]);
-    }
-    bminx = std::min(W - 1., std::max(0., W * bminx));
-    bminy = std::min(H - 1., std::max(0., H * bminy));
-    bmaxx = std::max(W - 1., std::max(0., W * bmaxx));
-    bmaxy = std::max(H - 1., std::max(0., H * bmaxy));
+  for (int j = 0; j < cells[i].vertices.size(); j++) {
+    bminx = std::min(bminx, cells[i].vertices[j][0]);
+    bminy = std::min(bminy, cells[i].vertices[j][1]);
+    bmaxx = std::max(bmaxx, cells[i].vertices[j][0]);
+    bmaxy = std::max(bmaxy, cells[i].vertices[j][1]);
+  }
+  bminx = std::min(W - 1., std::max(0., W * bminx));
+  bminy = std::min(H - 1., std::max(0., H * bminy));
+  bmaxx = std::max(W - 1., std::max(0., W * bmaxx));
+  bmaxy = std::max(H - 1., std::max(0., H * bmaxy));
 
-    for (int y = bminy; y < bmaxy; y++) {
-      for (int x = bminx; x < bmaxx; x++) {
-        int prevSign = 0;
-        bool isInside = true;
-        double mindistEdge = 1E9;
-        for (int j = 0; j < cells[i].vertices.size(); j++) {
-          double x0 = cells[i].vertices[j][0] * W;
-          double y0 = cells[i].vertices[j][1] * H;
-          double x1 = cells[i].vertices[(j + 1) % cells[i].vertices.size()][0] * W;
-          double y1 = cells[i].vertices[(j + 1) % cells[i].vertices.size()][1] * H;
-          double det = (x - x0) * (y1 - y0) - (y - y0) * (x1 - x0);
-          int sign = det / std::abs(det);
-          if (prevSign == 0)
-            prevSign = sign;
-          else if (sign == 0)
-            sign = prevSign;
-          else if (sign != prevSign) {
-            isInside = false;
-            break;
-          }
+  for (int y = bminy; y < bmaxy; y++) {
+    for (int x = bminx; x < bmaxx; x++) {
+      int prevSign = 0;
+      bool isInside = true;
+      double mindistEdge = 1E9;
+      for (int j = 0; j < cells[i].vertices.size(); j++) {
+        double x0 = cells[i].vertices[j][0] * W;
+        double y0 = cells[i].vertices[j][1] * H;
+        double x1 = cells[i].vertices[(j + 1) % cells[i].vertices.size()][0] * W;
+        double y1 = cells[i].vertices[(j + 1) % cells[i].vertices.size()][1] * H;
+        double det = (x - x0) * (y1 - y0) - (y - y0) * (x1 - x0);
+        int sign = det / std::abs(det);
+        if (prevSign == 0)
           prevSign = sign;
-          double edgeLen = sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
-          double distEdge = std::abs(det) / edgeLen;
-          double dotp = (x - x0) * (x1 - x0) + (y - y0) * (y1 - y0);
-          if (dotp < 0 || dotp > edgeLen * edgeLen)
-            distEdge = 1E9;
-          mindistEdge = std::min(mindistEdge, distEdge);
+        else if (sign == 0)
+          sign = prevSign;
+        else if (sign != prevSign) {
+          isInside = false;
+          break;
         }
-        if (isInside) {
-          if (i < N) { // the N first particles may represent fluid, displayed in blue
-            image[((H - y - 1) * W + x) * 3] = 0;
-            image[((H - y - 1) * W + x) * 3 + 1] = 0;
-            image[((H - y - 1) * W + x) * 3 + 2] = 255;
-          }
-          if (mindistEdge <= 2) {
-            image[((H - y - 1) * W + x) * 3] = 0;
-            image[((H - y - 1) * W + x) * 3 + 1] = 0;
-            image[((H - y - 1) * W + x) * 3 + 2] = 0;
-          }
+        prevSign = sign;
+        double edgeLen = sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
+        double distEdge = std::abs(det) / edgeLen;
+        double dotp = (x - x0) * (x1 - x0) + (y - y0) * (y1 - y0);
+        if (dotp < 0 || dotp > edgeLen * edgeLen)
+          distEdge = 1E9;
+        mindistEdge = std::min(mindistEdge, distEdge);
+      }
+      if (isInside) {
+        if (i < N) { // the N first particles may represent fluid, displayed in blue
+          image[((H - y - 1) * W + x) * 3] = 0;
+          image[((H - y - 1) * W + x) * 3 + 1] = 0;
+          image[((H - y - 1) * W + x) * 3 + 2] = 255;
+        }
+        if (mindistEdge <= 2) {
+          image[((H - y - 1) * W + x) * 3] = 0;
+          image[((H - y - 1) * W + x) * 3 + 1] = 0;
+          image[((H - y - 1) * W + x) * 3 + 2] = 0;
         }
       }
     }
+  }
 }
 
 void save_lines(size_t i0, size_t size, std::vector<unsigned char> &image, const std::vector<Polygon> &cells, int W, int H, int N) {
@@ -373,7 +374,7 @@ public:
       velocities[i] = velocities[i] + dt * fi / mass;
       points[i] = points[i] + dt * velocities[i];
       // Bounce with dampened velocity by 2
-      double velocity_dampening = 0.3;
+      double velocity_dampening = 0.1; //TODO check
       for (int j = 0; j < 2; j++) {
         if (points[i][j] < 0) {
           points[i][j] = -points[i][j] * velocity_dampening;
@@ -450,11 +451,33 @@ public:
   }
 
   std::vector<Polygon> generate_voronoi_liquid() {
-    std::vector<Polygon> init = generate_voronoi();
-    for (size_t i = 0; i < nb_liquid; i++) {
-      init[i] = clip_by_polygon(init[i], disk(points[i], sqrt(weights[i] - air_weight)));
+    std::vector<Polygon> voronoi(points.size());
+    std::vector<std::thread> threads(N_THREADS - 1);
+    size_t block_size = points.size() / N_THREADS;
+    for (int n_thread = 0; n_thread < N_THREADS - 1; n_thread++) {
+      threads[n_thread] = std::thread([this, n_thread, block_size, &voronoi]() {
+        for (size_t i = n_thread * block_size; i < (n_thread + 1) * block_size; i++) {
+          voronoi[i] = clip_by_polygon(Polygon({Vector(0, 0), Vector(1, 0), Vector(1, 1), Vector(0, 1)}), disk(points[i], sqrt(weights[i] - air_weight)));
+          for (size_t j = 0; j < points.size(); j++) {
+            if (i != j) {
+              voronoi[i] = clip_by_bissec_voronoi(voronoi[i], points[i], points[j], weights[i], weights[j]);
+            }
+          }
+        }
+      });
     }
-    return init;
+    for (size_t i = (N_THREADS - 1) * block_size; i < points.size(); i++) {
+      voronoi[i] = clip_by_polygon(Polygon({Vector(0, 0), Vector(1, 0), Vector(1, 1), Vector(0, 1)}), disk(points[i], sqrt(weights[i] - air_weight)));
+      for (size_t j = 0; j < points.size(); j++) {
+        if (i != j) {
+          voronoi[i] = clip_by_bissec_voronoi(voronoi[i], points[i], points[j], weights[i], weights[j]);
+        }
+      }
+    }
+    for (int n_thread = 0; n_thread < N_THREADS - 1; n_thread++) {
+      threads[n_thread].join();
+    }
+    return voronoi;
   }
 
   static Polygon disk(Vector origin, double radius, int n = 30) {
@@ -465,6 +488,29 @@ public:
       vertices.push_back(Vector(origin[0] + radius * cos(angle), origin[1] + radius * sin(angle)));
     }
     return Polygon(vertices);
+  }
+
+  static void evaluate_liquid_thread(const std::vector<Polygon> &voronoi, std::vector<lbfgsfloatval_t> &fx, std::vector<double> &liquid_area, lbfgsfloatval_t *g, const PointCloud &pc, int i_start, int i_end, int n_thread) {
+    // Store TOTAL result in n_thread for fx and liquid_area and PARTIAL result in g at i
+    fx[n_thread] = 0;
+    liquid_area[n_thread] = 0;
+    for (int i = i_start; i < i_end; i++) {
+      double v_area = 0;
+      // We add integral of ||x - yi||^2 for each i
+      for (Polygon tri : triangulate(voronoi[i])) {
+        double T = triangle_area(tri);
+        v_area += T;
+        for (int k = 0; k < 3; k++) {
+          for (int l = k; l < 3; l++) {
+            fx[n_thread] += (T / 6) * dot(tri.vertices[k] - pc.points[i], tri.vertices[l] - pc.points[i]);
+          }
+        }
+      }
+      // Finally
+      liquid_area[n_thread] += v_area;
+      g[i] = -(pc.liquid_proportion / pc.nb_liquid - v_area);
+      fx[n_thread] += -v_area * pc.weights[i] + pc.liquid_proportion / pc.nb_liquid * pc.weights[i];
+    }
   }
 
   static lbfgsfloatval_t evaluate_liquid( // contains extra parameters
@@ -483,26 +529,23 @@ public:
     pc.air_weight = x[pc.nb_liquid];
     // We have the point cloud, now we can calculate the voronoi diagram
     std::vector<Polygon> voronoi = pc.generate_voronoi_liquid();
-    // say the weights
-    lbfgsfloatval_t fx = 0.0;
+    // Initialize the vectors
+    std::vector<std::thread> threads(N_THREADS_EVALUATE-1);
+    int block_size = pc.nb_liquid / N_THREADS_EVALUATE;
+    std::vector<lbfgsfloatval_t> fx_vec(N_THREADS_EVALUATE);
+    std::vector<double> liquid_area_vec(N_THREADS_EVALUATE);
     // We make the actual computations
-    double total_liquid_area = 0;
-    for (int i = 0; i < pc.nb_liquid; i++) {
-      double v_area = 0;
-      // We add integral of ||x - yi||^2 for each i
-      for (Polygon tri : triangulate(voronoi[i])) {
-        double T = triangle_area(tri);
-        v_area += T;
-        for (int k = 0; k < 3; k++) {
-          for (int l = k; l < 3; l++) {
-            fx += (T / 6) * dot(tri.vertices[k] - pc.points[i], tri.vertices[l] - pc.points[i]);
-          }
-        }
-      }
-      total_liquid_area += v_area;
-      // Finally
-      g[i] = -(pc.liquid_proportion / pc.nb_liquid - v_area);
-      fx += -v_area * x[i] + pc.liquid_proportion / pc.nb_liquid * x[i];
+    for (int i = 0; i < N_THREADS_EVALUATE-1; i++) {
+      threads[i] = std::thread(&evaluate_liquid_thread, voronoi, std::ref(fx_vec), std::ref(liquid_area_vec), std::ref(g), pc, i * block_size, (i + 1) * block_size, i);
+    }
+    evaluate_liquid_thread(voronoi, fx_vec, liquid_area_vec, g, pc, (N_THREADS_EVALUATE-1) * block_size, pc.nb_liquid, N_THREADS_EVALUATE-1);
+    // Join the threads and merge the results
+    lbfgsfloatval_t fx = fx_vec[N_THREADS_EVALUATE-1];
+    double total_liquid_area = liquid_area_vec[N_THREADS_EVALUATE-1];
+    for (int i = 0; i < N_THREADS_EVALUATE-1; i++) {
+      threads[i].join();
+      fx += fx_vec[i];
+      total_liquid_area += liquid_area_vec[i];
     }
     double air_area = 1 - total_liquid_area;
     fx += x[pc.nb_liquid] * (1 - pc.liquid_proportion - air_area);
@@ -533,8 +576,8 @@ std::vector<Vector> semi_donut(int N) {
       per_radius = N - n_per_radius * (n_per_width - 1);
     }
     for (int j = 0; j < per_radius; j++) {
-      double angle = 3.141592653589793238 * j / per_radius;
-      points.push_back(Vector(0.5 - radius * cos(angle), 0.5 - radius * sin(angle)));
+      double angle = 3.141592653589793238 * (0.25 + ((double) j / (double) per_radius));
+      points.push_back(Vector(0.5 + radius * cos(angle), 0.5 + radius * sin(angle)));
     }
   }
   return points;
