@@ -1,9 +1,7 @@
 
 build:
 	del sim.exe
-	g++ main.cpp -O3 -o sim.exe
-
-# -Ofast -flto -funroll-loops -finline-functions -march=native
+	g++ main.cpp -Ofast -flto -funroll-loops -finline-functions -march=native -o sim.exe
 
 run: clean build
 	sim.exe
@@ -17,3 +15,7 @@ clean:
 	del debug_sim.exe
 	del *.svg
 	del *.png
+
+tutte:
+	del tutte.exe
+	g++ tutte_mapping.cpp -O3 -o tutte.exe
