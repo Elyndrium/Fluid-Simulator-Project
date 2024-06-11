@@ -374,14 +374,14 @@ public:
       velocities[i] = velocities[i] + dt * fi / mass;
       points[i] = points[i] + dt * velocities[i];
       // Bounce with dampened velocity by 2
-      double velocity_dampening = 0.1; //TODO check
+      double velocity_dampening[4] = {0.25, 0.25, 0.1, 0.2}; // Bounces less strongly on ground
       for (int j = 0; j < 2; j++) {
         if (points[i][j] < 0) {
-          points[i][j] = -points[i][j] * velocity_dampening;
-          velocities[i][j] = -velocities[i][j] * velocity_dampening;
+          points[i][j] = -points[i][j] * velocity_dampening[2*j];
+          velocities[i][j] = -velocities[i][j] * velocity_dampening[2*j];
         } else if (points[i][j] > 1) {
-          points[i][j] = 1 - (points[i][j] - 1) * velocity_dampening;
-          velocities[i][j] = -velocities[i][j] * velocity_dampening;
+          points[i][j] = 1 - (points[i][j] - 1) * velocity_dampening[2*j + 1];
+          velocities[i][j] = -velocities[i][j] * velocity_dampening[2*j + 1];
         }
       }
     }
@@ -568,16 +568,17 @@ std::vector<Vector> semi_donut(int N) {
   // n_per_radius*n_per_width = N && n_per_radius / 0.75 = n_per_width / 0.15
   // n_per_radius = 0.75 * n_per_width / 0.15 = 5 * n_per_width
   int n_per_width = std::floor(sqrt(N / 5));
-  int n_per_radius = 5 * n_per_width;
+  int n_per_radius = std::floor(sqrt(5*N));
+  while (n_per_width*n_per_radius > N){n_per_radius--;}
   for (int i = 0; i < n_per_width; i++) {
-    double radius = 0.15 + 0.20 * i / (n_per_width - 1);
+    double radius = 0.15 + 0.25 * i / (n_per_width - 1);
     int per_radius = n_per_radius;
     if (i == n_per_width - 1) {
       per_radius = N - n_per_radius * (n_per_width - 1);
     }
     for (int j = 0; j < per_radius; j++) {
-      double angle = 3.141592653589793238 * (0.25 + ((double) j / (double) per_radius));
-      points.push_back(Vector(0.5 + radius * cos(angle), 0.5 + radius * sin(angle)));
+      double angle = 3.141592653589793238 * (((double) j / (double) per_radius));
+      points.push_back(Vector(0.5 - radius * cos(angle), 0.5 - radius * sin(angle)));
     }
   }
   return points;
@@ -585,11 +586,13 @@ std::vector<Vector> semi_donut(int N) {
 
 int main() {
   // Create particles cloud
-  PointCloud pc(0.25, 600, semi_donut);
+  auto start = std::chrono::high_resolution_clock::now();
+  PointCloud pc(0.2, 600, semi_donut);
 
   // Create animation
-  pc.animate(70, 0.004, 0.025, 200);
-  std::cout << "Finished" << std::endl;
+  pc.animate(100, 0.004, 0.02, 200);
+  auto end = std::chrono::high_resolution_clock::now();
+  std::cout << "Finished in " << std::chrono::duration_cast<std::chrono::seconds>(end - start).count() << "s" << std::endl;
 
   return 0;
 }
