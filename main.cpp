@@ -289,13 +289,7 @@ public:
         weights.push_back(1);
       }
       // Lloyd iterations to make the points more regular
-      int n_lloyd = 10;
-      if (points.size() > 1000) {
-        n_lloyd = 5;
-        if (points.size() > 10000) {
-          n_lloyd = 3;
-        }
-      }
+      int n_lloyd = 15;
       if (points.size() <= 400) {
         n_lloyd = 30;
       }
@@ -587,10 +581,10 @@ std::vector<Vector> semi_donut(int N) {
 int main() {
   // Create particles cloud
   auto start = std::chrono::high_resolution_clock::now();
-  PointCloud pc(0.2, 600, semi_donut);
+  PointCloud pc(0.2, 1000);
 
   // Create animation
-  pc.animate(100, 0.004, 0.02, 200);
+  pc.animate(100, 0.004, 0.01, 250);
   auto end = std::chrono::high_resolution_clock::now();
   std::cout << "Finished in " << std::chrono::duration_cast<std::chrono::seconds>(end - start).count() << "s" << std::endl;
 
